@@ -1,0 +1,115 @@
+import numpy as np
+import pandas as pd
+import shutil, time, os, requests, random, copy
+
+import torch
+import torch.nn as nn
+import torch.distributed as dist
+from .gather import GatherLayer
+
+class SimCLR_Loss(nn.Module):
+    def __init__(self, batch_size, temperature):
+        super(SimCLR_Loss, self).__init__()
+        self.batch_size = batch_size
+        self.temperature = temperature
+
+        self.mask = self.mask_correlated_samples(batch_size)
+        self.criterion = nn.CrossEntropyLoss(reduction="sum")
+        self.similarity_f = nn.CosineSimilarity(dim=2)
+
+    def mask_correlated_samples(self, batch_size):
+        N = 2 * batch_size
+        mask = torch.ones((N, N), dtype=bool)
+        mask = mask.fill_diagonal_(0)
+        
+        for i in range(batch_size):
+            mask[i, batch_size + i] = 0
+            mask[batch_size + i, i] = 0
+        return mask
+
+    def forward(self, z_i, z_j):
+
+        N = 2 * self.batch_size
+
+        z_i = z_i.view(z_i.size(0), -1)
+        z_j = z_j.view(z_j.size(0), -1)
+
+        z = torch.cat((z_i, z_j), dim=0)
+
+        sim = self.similarity_f(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature
+
+        sim_i_j = torch.diag(sim, self.batch_size)
+        sim_j_i = torch.diag(sim, -self.batch_size)
+        
+        # We have 2N samples, but with Distributed training every GPU gets N examples too, resulting in: 2xNxN
+        positive_samples = torch.cat((sim_i_j, sim_j_i), dim=0).reshape(N, 1)
+        negative_samples = sim[self.mask].reshape(N, -1)
+        
+        #SIMCLR
+        labels = torch.from_numpy(np.array([0]*N)).reshape(-1).to(positive_samples.device).long() #.float()
+        
+        logits = torch.cat((positive_samples, negative_samples), dim=1)
+        loss = self.criterion(logits, labels)
+        loss /= N
+        
+        return loss
+
+class SimCLR_Loss_multi(nn.Module):
+    def __init__(self, batch_size, temperature, world_size):
+        super(SimCLR_Loss_multi, self).__init__()
+        self.batch_size = batch_size
+        self.temperature = temperature
+        self.world_size = world_size
+
+        self.mask = self.mask_correlated_samples(batch_size, world_size)
+        self.criterion = nn.CrossEntropyLoss(reduction="sum")
+        self.similarity_f = nn.CosineSimilarity(dim=2)
+
+    def mask_correlated_samples(self, batch_size, world_size):
+        N = 2 * batch_size * world_size
+        mask = torch.ones((N, N), dtype=bool)
+        mask = mask.fill_diagonal_(0)
+        for i in range(batch_size * world_size):
+            mask[i, batch_size * world_size + i] = 0
+            mask[batch_size * world_size + i, i] = 0
+        return mask
+
+    def forward(self, z_i, z_j):
+
+        N = 2 * self.batch_size * self.world_size
+        #print(f"z shape: {z_i.shape}, {z_j.shape}")
+        #z_i = z_i.view(z_i.size(0), -1)
+        #z_j = z_j.view(z_i.size(0), -1)
+
+        z_i = z_i.squeeze()
+        z_j = z_j.squeeze()
+
+        if self.world_size > 1:
+            z_i = torch.cat(GatherLayer.apply(z_i), dim=0)
+            z_j = torch.cat(GatherLayer.apply(z_j), dim=0)
+        # print(f"z shape: {z_i.shape}, {z_j.shape}")
+        
+        z = torch.cat((z_i, z_j), dim=0)
+        # print(z.shape)
+
+        # if self.world_size > 1:
+        #    z = torch.cat(GatherLayer.apply(z), dim=0)
+
+        #print(z.shape)
+        sim = self.similarity_f(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature
+
+        sim_i_j = torch.diag(sim, self.batch_size * self.world_size)
+        sim_j_i = torch.diag(sim, -self.batch_size * self.world_size)
+        #print(sim_i_j.shape)
+        # We have 2N samples, but with Distributed training every GPU gets N examples too, resulting in: 2xNxN
+        positive_samples = torch.cat((sim_i_j, sim_j_i), dim=0).reshape(N, 1)
+        negative_samples = sim[self.mask].reshape(N, -1)
+        
+        #SIMCLR
+        labels = torch.zeros(N).to(positive_samples.device).long()
+        
+        logits = torch.cat((positive_samples, negative_samples), dim=1)
+        loss = self.criterion(logits, labels)
+        loss /= N
+        
+        return loss
