@@ -21,4 +21,4 @@ python finetune_sacall_encoder.py -as training_signals_directory -al training_la
 The fine-tuned model can be used to basecall by:
 
 ```
-CUDA_VISIBLE_DEVICES=0 python call_ctc_encoder.py -model finetuned_model -records_dir signal_to_be_basecalled 
+CUDA_VISIBLE_DEVICES=0 python call_ctc_encoder.py -model finetuned_model -records_dir signal_to_be_basecalled -output new_basecall_directory
