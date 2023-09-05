@@ -5,7 +5,7 @@ This directory contains all the files necessary to pretrain a basecaller model u
 To pre-train using wav2vec2 using four GPUs run:
 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 python main.py -model_path model -epochs 100
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_wav2vec2.py -model_path model -epochs 100
 ```
 
 We provide our pre-trained models in the pretrained directory.
