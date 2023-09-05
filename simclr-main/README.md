@@ -5,7 +5,7 @@ This directory contains the files necessary to pre train a basecaller model usin
 To pretrain a model using SimCLR and two GPUs run:
 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 python main.py -model_path model -epochs 100
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_simclr.py -model_path model -epochs 100
 ```
 We provide our pre-trained models in the pretrained directory.
 
