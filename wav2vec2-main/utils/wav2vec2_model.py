@@ -308,7 +308,8 @@ class BasecallWav2Vec2(nn.Module):
                     y.size(1),
                     padding_count=padding_count,
                 )
-
+        
+        x = x[mask_indices].view(x.size(0), -1, x.size(-1))
         x = self.final_proj(x)
         #print(x.shape)
         x = self.compute_preds(x, y, negs)
